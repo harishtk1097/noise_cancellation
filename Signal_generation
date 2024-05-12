@@ -1,0 +1,202 @@
+% Data sample for processing
+clear all
+close all
+clc
+
+for j=1:2000
+    tic
+%% Parameters
+Nsensors=32;
+lookDir=[0:180];
+Nlookdir=length(lookDir);
+Duration=1; %s
+Fs=4096; % Hz
+n_target=2;%no:of targets
+tp=0.5;
+f=3000;
+
+% N=tp*fs;
+N_FFT=1024;
+c=1500; % speed of sound
+NSamples = Fs*Duration;
+Fmin = 1000; % Hz
+Fmax = 2000;
+StartBin = (Fmin*N_FFT)/Fs+1;
+StopBin =(Fmax*N_FFT)/Fs+1;
+
+NBins =  StopBin - StartBin + 1;
+
+
+
+d=c*0.45/Fmax;
+Spacing=(0:Nsensors-1).*d;
+%% Signal And Noise Generation
+
+
+% t=0:1/Fs:Duration-1/Fs;
+Signals=zeros(NSamples,Nsensors);
+
+% Signals1=zeros(NSamples,1);
+Noise=randn(NSamples,Nsensors);
+Signals1=sin(2*pi*(2000/Fs)*(0:NSamples-1)).';%randn(NSamples,1);
+Signals1=Signals1+Noise;
+% Low pass filter in the band 6400
+% load FilterCoef.mat
+% Sig_Filt = filter(Num,Den,Signals1);
+
+% load FilterCoef.mat
+% Sig_Filt = filter(Num,Den,Signals1);
+
+
+
+TargetDoA =[10 randi([30,120],1)];% degrees
+SNRdB=[randi([0,5],1),randi([-10,-5],1)];% in db
+SNR= 10.^(SNRdB/10);%in linear
+
+
+for i=1:length(TargetDoA)
+Delay=(Spacing*cosd(TargetDoA(i))/c);
+scal_Signals1=  sqrt(SNR(i))*Signals1;
+Signals=Signals+delayseq(scal_Signals1, Delay,Fs );
+end
+
+%% ------Signals of Nsesors in time domain
+
+% 
+% t=0:1/fs:tp-1/fs;
+% x=sin(2*pi*f*t);
+% power_x=(1/N)*sum(x.^2);%power
+% norm_x=1/sqrt(power_x)*x;%normalised signal, to scale corresponding SNR we should first normalize
+% 
+% L=(M-1)*d; %delay of the last sensor from the first
+% N2=ceil(L*fs/c)+N+ceil(L*fs/c);%length of the padded signal
+% 
+% t_sig=N2/fs;
+% t_padded=0:1/fs:t_sig-1/fs;%samples corressponding to padded signal
+% 
+% 
+% 
+% mult_delay=zeros(N2,M,n_target);
+% 
+% 
+% % generating the time series for the specified theta
+% for i=1:n_target
+%     
+%        scal_norm_x=  sqrt(SNR(i))*norm_x;%applying scaling
+%        [z1,ydelay,N1]= delay(scal_norm_x,d,M,theta(i),fs);%calling function delay
+%        mult_delay(:,:,i)=z1;%delayed matrix for each target
+%        signal_theta=z1; %delayed matrix
+%       
+% end
+% 
+% 
+% 
+% signal_multdelay=sum(mult_delay,3);%final signal received in each sensor corresponding to multiple target
+%                                        % adding across three dimension
+% % noise=randn(N2,M);%generating noise, noise will be normalised
+% % 
+% % noise_signal_multdelay=signal_multdelay+noise;%adding noise to each sensor output
+
+
+%% Frequency Domain Beamformer
+BroadfreqSignal=fft(Signals,N_FFT).';
+XVector = BroadfreqSignal(:,StartBin:StopBin);
+% XVector_CBF=XVector;
+
+%% Array Steering Vector
+
+ArryStrVector=zeros(Nsensors,Nlookdir,NBins);
+for isensors=0:Nsensors-1
+    for ibin=StartBin:StopBin
+        for ilook=1:Nlookdir
+            ArryStrVector(isensors+1,ilook,ibin-StartBin+1) =(1/Nsensors)*(exp(-1i*2*pi*ibin*(Fs/N_FFT)*(isensors)*d*cosd(lookDir(ilook))/c)); %Array steering vector
+        end
+    end
+end
+
+
+     
+%% Beam Pattern Plotting
+for ilook=1:Nlookdir
+    BP(ilook) = abs(ArryStrVector(:,ilook,NBins)'*ArryStrVector(:,51,NBins));
+end
+% plot(lookDir,20*log10(BP./max(BP)))
+
+
+
+%% Output calculation
+% OutputFreqBeam=zeros(NBins,1);% Output of frequency beamformer
+OutputPower=zeros(Nlookdir,1);%Power Spectrum initialization
+for ibin=StartBin:StopBin
+         ii=ibin-StartBin+1;
+ 
+        OutputFreqBeam(:,ii)=ArryStrVector(:,:,ii)'*XVector(:,ii)   ;
+        OutputPower=OutputPower+abs(OutputFreqBeam(:,ii)).^2;
+    
+        
+  
+end
+
+
+%% -----IBF--------------
+
+for iter1=1:1
+OutputPower_IBF=zeros(Nlookdir,1);%Power Spectrum initialization
+Xvector_new=zeros(Nsensors,NBins);
+
+
+    for ibin=StartBin:StopBin
+         ii=ibin-StartBin+1;
+    
+        Steering_Ibf=exp(-1i*2*pi*(ibin)*(Fs/N_FFT)*(0:Nsensors-1)*d*cosd(TargetDoA(1))/c);
+        Xvector_Tow=OutputFreqBeam(TargetDoA(1),ii)*Steering_Ibf.';
+        
+%         a=abs(real(XVector(:,ii)))-abs(real(Xvector_Tow));
+%         b=abs(imag(XVector(:,ii)))-abs(imag(Xvector_Tow));
+%         Xvector_new(:,ii)=a+1i*(b); 
+        Xvector_new(:,ii)=XVector(:,ii)-Xvector_Tow;
+        OutputFreqBeam_IBF=ArryStrVector(:,:,ii)'*Xvector_new(:,ii) ;
+        OutputPower_IBF=OutputPower_IBF+abs(OutputFreqBeam_IBF).^2;
+        
+         
+      
+    end
+%    tow= Xvector_Tow
+%    a= XVector(:,end)
+%    b=Xvector_new(:,end)
+  
+%      XVector=Xvector_new;
+     Signal_clean=ifft(Xvector_new.',Fs);
+end
+S(:,:,j)=Signal_clean;
+Y(:,:,j)=Signals;
+ [Uy Dy Vy]=svd(Signals);
+    [Uu Du Vu]=svd(Signal_clean);
+    D_in(:,:,j)=Dy;
+    D_ibf(:,:,j)=Du;
+%     U_in(:,:,j)=Uy;
+%     V_in(:,:,j)=Vy;
+toc
+end
+
+save('Input_Clean.mat','S','-v7.3');
+
+save('Input_Noise.mat', 'Y','-v7.3');
+save('Input_D_in.mat','D_in','-v7.3');
+save('Input_D_ibf.mat','D_ibf','-v7.3');
+save('Input_U_in.mat','Uy','-v7.3');
+save('Input_V_in.mat','Vy','-v7.3');
+save('Input_Dy.mat','Dy','-v7.3');
+save('Input_Uu.mat','Uu','-v7.3');
+save('Input_Vu.mat','Vu','-v7.3');
+save('Input_Du.mat','Du','-v7.3');
+
+% save 'Input_cbf_10.mat', Y;
+
+
+
+plot(lookDir,OutputPower./max(OutputPower));
+hold on
+plot(lookDir,OutputPower_IBF./max(OutputPower_IBF));
+
+%----------------------------------------------------------------------------------------------
